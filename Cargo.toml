@@ -1,0 +1,22 @@
+[package]
+name = "gorm"
+version = "0.1.0"
+description = "Mobile-optimized Linux WiFi settings"
+authors = ["Christian Duerr <contact@christianduerr.com>"]
+repository = "https://github.com/catacombing/gorm"
+rust-version = "1.85.0"
+license = "GPL-3.0"
+edition = "2024"
+
+[dependencies]
+glutin = { version = "0.32.1", default-features = false, features = ["egl", "wayland"] }
+raw-window-handle = "0.6.2"
+smithay-client-toolkit = { version = "0.19.2", default-features = false, features = ["xkbcommon"] }
+thiserror = "2.0.12"
+tokio = "1.44.2"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+wayland-backend = { version = "0.3.10", features = ["client_system"] }
+
+[build-dependencies]
+gl_generator = "0.14.0"
