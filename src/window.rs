@@ -1208,13 +1208,12 @@ impl AccessPointDetails {
         // Update layout's text.
         let layout_text = format!(
             "SSID: {}\nBSSID: {}\nFrequency: {} MHz\nSecurity: {}\nConnection Strength: \
-             {}%\nProfile saved: {}",
+             {}%",
             access_point.ssid,
             access_point.bssid,
             access_point.frequency,
             access_point.private,
             access_point.strength,
-            access_point.profile.is_some(),
         );
         self.layout.set_text(&layout_text);
 
