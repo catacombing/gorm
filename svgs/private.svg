@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="72.888245mm" height="65mm" viewBox="0 0 72.888245 65" version="1.1" id="svg5" xml:space="preserve" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg">
+  <defs id="defs9">
+    <clipPath clipPathUnits="userSpaceOnUse" id="clipPath32171">
+      <path style="display:none;fill:#000000;fill-opacity:1;stroke:none;stroke-width:4.99999;stroke-dasharray:none;stroke-opacity:1;paint-order:markers fill stroke" d="m -192.5,417.498 h 15 v -4.99999 c 0,-10.3047 -15,-10.29351 -15,0 z" id="path32173" />
+      <path id="lpe_path-effect32175" style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:4.99999;stroke-dasharray:none;stroke-opacity:1;paint-order:markers fill stroke" class="powerclip" d="m -205,394.74639 h 40 V 447.498 h -40 z m 12.5,22.75161 h 15 v -4.99999 c 0,-10.3047 -15,-10.29351 -15,0 z" />
+    </clipPath>
+  </defs>
+  <path style="fill:#ffffff;fill-opacity:1;stroke:none;stroke-width:4.99999;stroke-dasharray:none;stroke-opacity:1;paint-order:markers fill stroke" d="m -200,442.498 v -25 h 2.5 v -5 c 0,-16.98892 25,-17.01537 25,0 v 5 h 2.5 v 25 z" id="path31345" clip-path="url(#clipPath32171)" transform="matrix(1.188,0,0,1.188,256.22412,-467.79317)" />
+</svg>

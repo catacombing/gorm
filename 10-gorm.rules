@@ -1,0 +1,35 @@
+// Allow "catacomb" group members to request WiFi scans.
+polkit.addRule(function(action, subject) {
+	if (action.id == "org.freedesktop.NetworkManager.wifi.scan"
+        && subject.isInGroup("catacomb"))
+    {
+		return "yes";
+	}
+});
+
+// Allow "catacomb" group members to disable WiFi networks.
+polkit.addRule(function(action, subject) {
+	if (action.id == "org.freedesktop.NetworkManager.network-control"
+        && subject.isInGroup("catacomb"))
+    {
+		return "yes";
+	}
+});
+
+// Allow "catacomb" group members to modify network connection profiles.
+polkit.addRule(function(action, subject) {
+	if (action.id == "org.freedesktop.NetworkManager.settings.modify.system"
+        && subject.isInGroup("catacomb"))
+    {
+		return "yes";
+	}
+});
+
+// Allow "catacomb" group members to enable/disable WiFi.
+polkit.addRule(function(action, subject) {
+	if (action.id == "org.freedesktop.NetworkManager.enable-disable-wifi"
+        && subject.isInGroup("catacomb"))
+    {
+		return "yes";
+	}
+});

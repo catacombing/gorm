@@ -1,0 +1,10 @@
+<svg width="32" height="32" viewBox="0 0 32 32" version="1.1" id="svg1" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg">
+  <defs id="defs1">
+    <marker style="overflow:visible" id="Triangle" refX="0" refY="0" orient="auto-start-reverse" markerWidth="0.75" markerHeight="0.75" viewBox="0 0 1 1" preserveAspectRatio="xMidYMid">
+      <path transform="scale(0.5)" style="fill:context-stroke;fill-rule:evenodd;stroke:context-stroke;stroke-width:1pt" d="M 5.77,0 -2.88,5 V -5 Z" id="path135" />
+    </marker>
+  </defs>
+  <g id="layer1">
+    <path style="fill:none;stroke:#ffffff;stroke-width:2;stroke-linejoin:miter;stroke-miterlimit:2;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Triangle)" id="path1" d="M 27.922547,14.638794 A 12,12 0 0 1 19.387076,27.512068 12,12 0 0 1 5.2399866,21.312449 12,12 0 0 1 8.9198056,6.3113031 12,12 0 0 1 24.329906,7.3621373" />
+  </g>
+</svg>

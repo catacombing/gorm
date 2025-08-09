@@ -2,18 +2,30 @@
 
 use std::ffi::CString;
 use std::num::NonZeroU32;
+use std::ops::{Deref, Range};
 use std::ptr::NonNull;
-use std::{mem, ptr};
+use std::sync::OnceLock;
+use std::{cmp, mem, ptr};
 
+use dashmap::DashMap;
+use gio::{Cancellable, File, MemoryInputStream};
+use glib::Bytes;
 use glutin::config::{Api, ConfigTemplateBuilder};
 use glutin::context::{ContextApi, ContextAttributesBuilder, PossiblyCurrentContext, Version};
 use glutin::display::Display;
 use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
+use pangocairo::cairo::{Context, Format, ImageSurface, Rectangle};
+use pangocairo::pango::{
+    AttrColor, AttrInt, AttrList, EllipsizeMode, FontDescription, Layout, SCALE as PANGO_SCALE,
+    Underline,
+};
 use raw_window_handle::{RawWindowHandle, WaylandWindowHandle};
+use rsvg::{CairoRenderer, Loader};
 use smithay_client_toolkit::reexports::client::Proxy;
 use smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface;
 
+use crate::config::{Config, FontFamily};
 use crate::geometry::{Position, Size};
 use crate::gl;
 use crate::gl::types::{GLfloat, GLint, GLuint};
@@ -21,6 +33,9 @@ use crate::gl::types::{GLfloat, GLint, GLuint};
 // OpenGL shader programs.
 const VERTEX_SHADER: &str = include_str!("../shaders/vertex.glsl");
 const FRAGMENT_SHADER: &str = include_str!("../shaders/fragment.glsl");
+
+// Selection caret height in pixels at scale 1.
+const CARET_SIZE: f64 = 5.;
 
 /// OpenGL renderer.
 #[derive(Debug)]
@@ -337,6 +352,393 @@ impl Texture {
     pub fn delete(&self) {
         unsafe {
             gl::DeleteTextures(1, &self.id);
+        }
+    }
+}
+
+/// Cairo-based graphics rendering.
+pub struct TextureBuilder<'a> {
+    image_surface: ImageSurface,
+    config: &'a Config,
+    pub context: Context,
+    size: Size<i32>,
+}
+
+impl<'a> TextureBuilder<'a> {
+    pub fn new(config: &'a Config, size: Size<i32>) -> Self {
+        let image_surface = ImageSurface::create(Format::ARgb32, size.width, size.height).unwrap();
+        let context = Context::new(&image_surface).unwrap();
+
+        Self { image_surface, context, config, size }
+    }
+
+    /// Fill entire buffer with a single color.
+    pub fn clear(&self, color: [f64; 3]) {
+        self.context.set_source_rgb(color[0], color[1], color[2]);
+        self.context.paint().unwrap();
+    }
+
+    /// Draw text within the specified bounds.
+    pub fn rasterize(&self, layout: &TextLayout, text_options: &TextOptions) {
+        // Limit text size to builder limits.
+        let position = text_options.position;
+        let size = match text_options.size {
+            Some(mut size) => {
+                size.width = cmp::min(size.width, self.size.width - position.x.round() as i32);
+                size.height = cmp::min(size.height, self.size.height - position.y.round() as i32);
+                size
+            },
+            None => {
+                let width = self.size.width - position.x.round() as i32;
+                let height = self.size.height - position.y.round() as i32;
+                Size::new(width, height)
+            },
+        };
+
+        // Truncate text beyond specified bounds.
+        if text_options.ellipsize {
+            layout.set_width(size.width * PANGO_SCALE);
+            layout.set_ellipsize(EllipsizeMode::End);
+            layout.set_height(0);
+        }
+
+        // Calculate text position.
+        let text_height = layout.pixel_size().1;
+        let text_y = position.y + size.height as f64 / 2. - text_height as f64 / 2.;
+
+        // Handle text selection.
+        let color =
+            text_options.text_color.unwrap_or_else(|| self.config.colors.foreground.as_f64());
+        if let Some(selection) = &text_options.selection {
+            // Set fg/bg colors of selected text.
+
+            let text_attributes = AttrList::new();
+
+            let selection_bg = self.config.colors.highlight.as_u16();
+            let mut bg_attr =
+                AttrColor::new_background(selection_bg[0], selection_bg[1], selection_bg[2]);
+            bg_attr.set_start_index(selection.start as u32);
+            bg_attr.set_end_index(selection.end as u32);
+            text_attributes.insert(bg_attr);
+
+            let selection_fg = self.config.colors.background.as_u16();
+            let mut fg_attr =
+                AttrColor::new_foreground(selection_fg[0], selection_fg[1], selection_fg[2]);
+            fg_attr.set_start_index(selection.start as u32);
+            fg_attr.set_end_index(selection.end as u32);
+            text_attributes.insert(fg_attr);
+
+            layout.set_attributes(Some(&text_attributes));
+
+            // Draw selection carets.
+            let draw_caret = |index| {
+                let (selection_cursor, _) = layout.cursor_pos(index);
+                let caret_x = position.x + selection_cursor.x() as f64 / PANGO_SCALE as f64;
+                let caret_size = CARET_SIZE * layout.scale;
+                self.context.move_to(caret_x, text_y);
+                self.context.line_to(caret_x + caret_size, text_y - caret_size);
+                self.context.line_to(caret_x - caret_size, text_y - caret_size);
+                self.context.set_source_rgb(color[0], color[1], color[2]);
+                self.context.fill().unwrap();
+            };
+            draw_caret(selection.start);
+            draw_caret(selection.end);
+        }
+
+        // Temporarily insert preedit text.
+        let mut text_without_virtual = None;
+        let has_preedit = !text_options.preedit.0.is_empty();
+        if has_preedit {
+            // Store text before insertion.
+            let mut virtual_text = layout.text().to_string();
+            text_without_virtual = Some(virtual_text.clone());
+
+            if has_preedit {
+                // Insert preedit text.
+                let preedit_start = text_options.cursor_pos as usize;
+                let preedit_end = preedit_start + text_options.preedit.0.len();
+                virtual_text.insert_str(preedit_start, &text_options.preedit.0);
+
+                // Add underline below preedit text.
+                let attributes = layout.attributes().unwrap_or_default();
+                let mut ul_attr = AttrInt::new_underline(Underline::Single);
+                ul_attr.set_start_index(preedit_start as u32);
+                ul_attr.set_end_index(preedit_end as u32);
+                attributes.insert(ul_attr);
+                layout.set_attributes(Some(&attributes));
+            }
+
+            layout.set_text(&virtual_text);
+        }
+
+        // Set attributes for multi-character IME underline cursor.
+        let (cursor_start, cursor_end) = text_options.cursor_pos();
+        if text_options.show_cursor && cursor_end > cursor_start {
+            let mut ul_attr = AttrInt::new_underline(Underline::Double);
+            ul_attr.set_start_index(cursor_start as u32);
+            ul_attr.set_end_index(cursor_end as u32);
+
+            let attributes = layout.attributes().unwrap_or_default();
+            attributes.insert(ul_attr);
+
+            layout.set_attributes(Some(&attributes));
+        }
+
+        // Render text.
+        self.context.move_to(position.x, text_y);
+        self.context.set_source_rgb(color[0], color[1], color[2]);
+        pangocairo::functions::show_layout(&self.context, layout);
+
+        // Draw normal I-Beam cursor above text.
+        if text_options.show_cursor && cursor_start == cursor_end {
+            // Get cursor rect and convert it from pango coordinates.
+            let (cursor_rect, _) = layout.cursor_pos(cursor_start);
+            let cursor_x = position.x + cursor_rect.x() as f64 / PANGO_SCALE as f64;
+            let cursor_y = text_y + cursor_rect.y() as f64 / PANGO_SCALE as f64;
+            let cursor_height = cursor_rect.height() as f64 / PANGO_SCALE as f64;
+
+            // Draw cursor line.
+            self.context.move_to(cursor_x, cursor_y);
+            self.context.line_to(cursor_x, cursor_y + cursor_height);
+            self.context.stroke_preserve().unwrap();
+        }
+
+        // Clear selection markup attributes after rendering.
+        layout.set_attributes(None);
+
+        // Reset text to remove preedit.
+        if let Some(text) = text_without_virtual.take() {
+            layout.set_text(&text);
+        }
+    }
+
+    /// Draw text within the specified bounds.
+    pub fn rasterize_svg(&self, svg: Svg, x: f64, y: f64, width: f64, height: f64) {
+        let stream = MemoryInputStream::from_bytes(&Bytes::from_static(svg.content()));
+        let mut handle =
+            Loader::new().read_stream(&stream, None::<&File>, None::<&Cancellable>).unwrap();
+
+        // Override SVG colors with configured foreground color.
+        let [r, g, b, _] = self.config.colors.foreground.as_u8();
+        #[rustfmt::skip]
+        let stylesheet = format!("svg > :not(defs), marker > * {{
+            stroke: #{r:0>2x}{g:0>2x}{b:0>2x};
+            fill: #{r:0>2x}{g:0>2x}{b:0>2x};
+        }}");
+        handle.set_stylesheet(&stylesheet).unwrap();
+
+        let renderer = CairoRenderer::new(&handle);
+        renderer.render_document(&self.context, &Rectangle::new(x, y, width, height)).unwrap();
+    }
+
+    /// Finalize the output texture.
+    pub fn build(self) -> Texture {
+        drop(self.context);
+
+        // Transform cairo buffer from RGBA to BGRA.
+        let width = self.image_surface.width() as usize;
+        let height = self.image_surface.height() as usize;
+        let mut data = self.image_surface.take_data().unwrap();
+        for chunk in data.chunks_mut(4) {
+            chunk.swap(2, 0);
+        }
+
+        Texture::new(&data, width, height)
+    }
+}
+
+/// Options for text rendering.
+pub struct TextOptions {
+    selection: Option<Range<i32>>,
+    text_color: Option<[f64; 3]>,
+    preedit: (String, i32, i32),
+    position: Position<f64>,
+    size: Option<Size<i32>>,
+    show_cursor: bool,
+    cursor_pos: i32,
+    ellipsize: bool,
+}
+
+impl TextOptions {
+    pub fn new() -> Self {
+        Self {
+            ellipsize: true,
+            cursor_pos: -1,
+            show_cursor: Default::default(),
+            text_color: Default::default(),
+            selection: Default::default(),
+            position: Default::default(),
+            preedit: Default::default(),
+            size: Default::default(),
+        }
+    }
+
+    /// Set text color.
+    pub fn text_color(&mut self, color: [f64; 3]) {
+        self.text_color = Some(color);
+    }
+
+    /// Set text position.
+    pub fn position(&mut self, position: Position<f64>) {
+        self.position = position;
+    }
+
+    /// Set text size.
+    pub fn size(&mut self, size: Size<i32>) {
+        self.size = Some(size);
+    }
+
+    /// Show text input cursor.
+    pub fn show_cursor(&mut self) {
+        self.show_cursor = true;
+    }
+
+    /// Set text input cursor position.
+    pub fn cursor_position(&mut self, pos: i32) {
+        self.cursor_pos = pos;
+    }
+
+    /// Text selection range.
+    pub fn selection(&mut self, selection: Option<Range<i32>>) {
+        self.selection = selection;
+    }
+
+    /// Preedit text and cursor.
+    pub fn preedit(&mut self, (text, cursor_begin, cursor_end): (String, i32, i32)) {
+        self.preedit = (text, cursor_begin, cursor_end);
+    }
+
+    /// Get cursor position.
+    pub fn cursor_pos(&self) -> (i32, i32) {
+        if !self.preedit.0.is_empty() {
+            let cursor_pos = self.cursor_pos.max(0);
+            (cursor_pos + self.preedit.1, cursor_pos + self.preedit.2)
+        } else {
+            (self.cursor_pos, self.cursor_pos)
+        }
+    }
+
+    /// Set whether text should be truncated with an ellipsis.
+    pub fn ellipsize(&mut self, ellipsize: bool) {
+        self.ellipsize = ellipsize;
+    }
+}
+
+impl Default for TextOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Font layout with font description.
+pub struct TextLayout {
+    layout: Layout,
+    font: FontDescription,
+    font_family: FontFamily,
+    font_size: u8,
+    scale: f64,
+}
+
+impl TextLayout {
+    pub fn new(font_family: FontFamily, font_size: u8, scale: f64) -> Self {
+        // Create pango layout.
+        let image_surface = ImageSurface::create(Format::ARgb32, 0, 0).unwrap();
+        let context = Context::new(&image_surface).unwrap();
+        let layout = pangocairo::functions::create_layout(&context);
+
+        // Set font description.
+        let font_desc = format!("{font_family} {font_size}px");
+        let mut font = FontDescription::from_string(&font_desc);
+        font.set_absolute_size(font.size() as f64 * scale);
+        layout.set_font_description(Some(&font));
+
+        Self { layout, font, font_family, font_size, scale }
+    }
+
+    /// Update the font scale.
+    pub fn set_scale(&mut self, scale: f64) {
+        if scale == self.scale {
+            return;
+        }
+        self.scale = scale;
+
+        // Update font size.
+        let pango_size = self.font_size as i32 * PANGO_SCALE;
+        self.font.set_absolute_size(pango_size as f64 * scale);
+        self.layout.set_font_description(Some(&self.font));
+    }
+
+    /// Get font's line height.
+    ///
+    /// This internally maintains a cache of the line heights at each font size.
+    pub fn line_height(&self) -> i32 {
+        static CACHE: OnceLock<DashMap<(FontFamily, u16), i32>> = OnceLock::new();
+        let cache = CACHE.get_or_init(DashMap::new);
+
+        // Get scaled font size with one decimal point.
+        let font_size = (self.font_size as f64 * self.scale * 10.).round() as u16;
+
+        // Calculate and cache line height.
+        *cache.entry((self.font_family.clone(), font_size)).or_insert_with(|| {
+            // Get logical line height from font metrics.
+            let metrics = self.context().metrics(Some(&self.font), None);
+            metrics.height() / PANGO_SCALE
+        })
+    }
+
+    /// Update the layout's font family and size.
+    pub fn set_font(&mut self, font_family: &FontFamily, font_size: u8) {
+        // Ignore request if there are no changes.
+        if &self.font_family == font_family && self.font_size == font_size {
+            return;
+        }
+
+        let font_desc = format!("{font_family} {font_size}px");
+        self.font = FontDescription::from_string(&font_desc);
+        self.font.set_absolute_size(self.font.size() as f64 * self.scale);
+        self.layout.set_font_description(Some(&self.font));
+        self.font_family = font_family.clone();
+        self.font_size = font_size;
+    }
+}
+
+impl Deref for TextLayout {
+    type Target = Layout;
+
+    fn deref(&self) -> &Self::Target {
+        &self.layout
+    }
+}
+
+/// Available SVG images.
+#[derive(Copy, Clone)]
+pub enum Svg {
+    ArrowLeft,
+    Refresh,
+    Private,
+    Public,
+    WifiDisabled,
+    Wifi100,
+    Wifi75,
+    Wifi50,
+    Wifi25,
+    Wifi0,
+}
+
+impl Svg {
+    /// Get SVG's text content.
+    const fn content(&self) -> &'static [u8] {
+        match self {
+            Self::ArrowLeft => include_bytes!("../svgs/arrow_left.svg"),
+            Self::Refresh => include_bytes!("../svgs/refresh.svg"),
+            Self::Private => include_bytes!("../svgs/private.svg"),
+            Self::Public => include_bytes!("../svgs/public.svg"),
+            Self::WifiDisabled => include_bytes!("../svgs/wifi_disabled.svg"),
+            Self::Wifi100 => include_bytes!("../svgs/wifi_100.svg"),
+            Self::Wifi75 => include_bytes!("../svgs/wifi_75.svg"),
+            Self::Wifi50 => include_bytes!("../svgs/wifi_50.svg"),
+            Self::Wifi25 => include_bytes!("../svgs/wifi_25.svg"),
+            Self::Wifi0 => include_bytes!("../svgs/wifi_0.svg"),
         }
     }
 }

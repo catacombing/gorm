@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Gorm
+Exec=gorm
+Comment=WiFi connection manager
+Icon=Gorm
+Categories=System
+Keywords=mobile;wayland

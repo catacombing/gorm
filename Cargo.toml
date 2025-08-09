@@ -9,14 +9,25 @@ license = "GPL-3.0"
 edition = "2024"
 
 [dependencies]
+calloop = { version = "0.14.3", features = ["executor"] }
+calloop-wayland-source = "0.4.0"
+configory = { version = "0.5.1", features = ["docgen", "log"] }
+dashmap = "6.1.0"
+futures-util = { version = "0.3.31", features = ["tokio-io"] }
+gio = "0.20.1"
+glib = "0.20.1"
 glutin = { version = "0.32.1", default-features = false, features = ["egl", "wayland"] }
+librsvg = "2.60.0"
+pangocairo = "0.20.1"
 raw-window-handle = "0.6.2"
+serde = { version = "1.0.219", features = ["derive"] }
 smithay-client-toolkit = { version = "0.19.2", default-features = false, features = ["xkbcommon"] }
 thiserror = "2.0.12"
-tokio = "1.44.2"
+tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 wayland-backend = { version = "0.3.10", features = ["client_system"] }
+zbus = { version = "5.9.0", default-features = false, features = ["tokio"] }
 
 [build-dependencies]
 gl_generator = "0.14.0"

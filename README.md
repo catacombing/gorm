@@ -5,37 +5,6 @@ through a touch friendly and efficient GUI.
 
 ## Permissions
 
-The following polkit rules are required to allow users of the group `wheel` to
-control all WiFi settings:
-
-> /etc/polkit-1/rules.d/10-network-manager.rules
-
-```
-// Allow wheel users to request WiFi scans.
-polkit.addRule(function(action, subject) {
-	if (action.id == "org.freedesktop.NetworkManager.wifi.scan" && subject.isInGroup("wheel")) {
-		return "yes";
-	}
-});
-
-// Allow wheel users to disable WiFi networks.
-polkit.addRule(function(action, subject) {
-	if (action.id == "org.freedesktop.NetworkManager.network-control" && subject.isInGroup("wheel")) {
-		return "yes";
-	}
-});
-
-// Allow creating new network connections.
-polkit.addRule(function(action, subject) {
-	if (action.id == "org.freedesktop.NetworkManager.settings.modify.system" && subject.isInGroup("wheel")) {
-		return "yes";
-	}
-});
-
-// Allow wheel users to enable/disable WiFi.
-polkit.addRule(function(action, subject) {
-	if (action.id == "org.freedesktop.NetworkManager.enable-disable-wifi" && subject.isInGroup("wheel")) {
-		return "yes";
-	}
-});
-```
+To allow managing NetworkManager through DBus, Gorm requires some polkit
+permissions. The rules to grant these permissions to users in the `catacomb`
+group can be found at [./10-gorm.rules].
