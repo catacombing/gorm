@@ -1207,8 +1207,7 @@ impl AccessPointDetails {
 
         // Update layout's text.
         let layout_text = format!(
-            "SSID: {}\nBSSID: {}\nFrequency: {} MHz\nSecurity: {}\nConnection Strength: \
-             {}%",
+            "SSID: {}\nBSSID: {}\nFrequency: {} MHz\nSecurity: {}\nConnection Strength: {}%",
             access_point.ssid,
             access_point.bssid,
             access_point.frequency,
