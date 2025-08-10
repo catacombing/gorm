@@ -355,7 +355,16 @@ impl Window {
 
     /// Update the active WiFi connections.
     pub fn set_access_points(&mut self, access_points: Vec<AccessPoint>) {
+        // Update active access point while in details view.
+        if let View::Details(details_ap) = &mut self.view {
+            match access_points.iter().find(|ap| ap.bssid == details_ap.bssid) {
+                Some(ap) => *details_ap = ap.clone(),
+                None => self.view = View::List,
+            }
+        }
+
         self.textures.access_points = access_points;
+
         self.dirty = true;
         self.unstall();
     }
