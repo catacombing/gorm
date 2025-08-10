@@ -502,10 +502,10 @@ impl TextField {
     /// Set preedit text at the current cursor position.
     pub fn set_preedit_string(&mut self, text: String, cursor_begin: i32, cursor_end: i32) {
         // Delete selection as soon as preedit starts.
-        if !text.is_empty() {
-            if let Some(selection) = self.selection.take() {
-                self.delete_selected(selection);
-            }
+        if !text.is_empty()
+            && let Some(selection) = self.selection.take()
+        {
+            self.delete_selected(selection);
         }
 
         self.preedit = (text, cursor_begin, cursor_end);
