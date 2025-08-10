@@ -585,7 +585,7 @@ impl Window {
                     let ssid = access_point.ssid.clone();
                     let private = access_point.private;
 
-                    spawn_async(&self.event_loop, "disconnect failed", async move {
+                    spawn_async(&self.event_loop, "AP connect failed", async move {
                         match profile {
                             Some(profile) => dbus::reconnect(&*path, profile).await,
                             None if private || password.is_empty() => {
@@ -604,7 +604,7 @@ impl Window {
 
                 if rect_contains(button_position, button_size, position) {
                     let ssid = access_point.ssid.clone();
-                    spawn_async(&self.event_loop, "disconnect failed", async move {
+                    spawn_async(&self.event_loop, "AP disconnect failed", async move {
                         dbus::disconnect(&ssid).await
                     });
                 }
@@ -618,7 +618,8 @@ impl Window {
                 if rect_contains(button_position, button_size, position)
                     && let Some(profile) = (*access_point.profile).clone()
                 {
-                    spawn_async(&self.event_loop, "disconnect failed", dbus::forget(profile));
+                    let msg = "AP profile deletion failed";
+                    spawn_async(&self.event_loop, msg, dbus::forget(profile));
                 }
             },
             // Go to previous UI page.
