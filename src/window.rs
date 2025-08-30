@@ -597,7 +597,7 @@ impl Window {
                     spawn_async(&self.event_loop, "AP connect failed", async move {
                         match profile {
                             Some(profile) => dbus::reconnect(&*path, profile).await,
-                            None if private || password.is_empty() => {
+                            None if !private || password.is_empty() => {
                                 dbus::connect(&*path, &ssid, None).await
                             },
                             None => dbus::connect(&*path, &ssid, Some(password)).await,
