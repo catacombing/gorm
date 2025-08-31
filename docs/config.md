@@ -33,8 +33,7 @@ This section documents the `[color]` table.
 |highlight|Primary accent color|color|`"#752a2a"`|
 |alt_foreground|Alternative foreground color|color|`"#bfbfbf"`|
 |alt_background|Alternative background color|color|`"#282828"`|
-|error|Error foreground color|color|`"#ac4242"`|
-|disabled|Disabled foreground color|color|`"#666666"`|
+|error|Error color|color|`"#ac4242"`|
 
 ### input
 
