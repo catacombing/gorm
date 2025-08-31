@@ -359,7 +359,7 @@ impl Window {
         if let View::Details(details_ap) = &mut self.view {
             match access_points.iter().find(|ap| ap.bssid == details_ap.bssid) {
                 Some(ap) => *details_ap = ap.clone(),
-                None => self.view = View::List,
+                None => self.set_view(View::List),
             }
         }
 
@@ -376,6 +376,12 @@ impl Window {
             self.dirty = true;
             self.unstall();
         }
+    }
+
+    /// Mark password as invalid.
+    pub fn set_auth_failed(&mut self) {
+        self.password_field.set_failed();
+        self.unstall();
     }
 
     /// Update the window's logical size.
@@ -638,9 +644,7 @@ impl Window {
                 let position = self.touch_state.position;
 
                 if rect_contains(button_position, button_size, position) {
-                    self.view = View::List;
-                    self.dirty = true;
-                    self.unstall();
+                    self.set_view(View::List);
                 }
             },
             // Handle password input touch release.
@@ -683,9 +687,7 @@ impl Window {
             // Open details page for an AP.
             (View::List, TouchAction::EntryTap(index)) => {
                 if let Some(access_point) = self.textures.access_points.get(index) {
-                    self.view = View::Details(access_point.clone());
-                    self.dirty = true;
-                    self.unstall();
+                    self.set_view(View::Details(access_point.clone()));
                 }
             },
             _ => (),
@@ -977,6 +979,17 @@ impl Window {
 
         // Calculate list content outside the viewport.
         entry_height.saturating_sub(available_height)
+    }
+
+    /// Change the visible view.
+    fn set_view(&mut self, view: View) {
+        // Clear password on view change.
+        self.password_field.clear_text();
+
+        self.view = view;
+
+        self.dirty = true;
+        self.unstall();
     }
 }
 

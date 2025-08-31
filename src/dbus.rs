@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures_util::stream::StreamExt;
+use serde_repr::Deserialize_repr;
 use tracing::error;
 use zbus::zvariant::serialized::Context;
 use zbus::zvariant::{
@@ -13,10 +14,15 @@ use zbus::{Connection, proxy};
 use crate::Error;
 
 /// Listen for WiFi events.
-pub async fn wifi_listen<F, G>(status_changed: F, aps_changed: G) -> Result<(), Error>
+pub async fn wifi_listen<F, G, H>(
+    status_changed: F,
+    aps_changed: G,
+    auth_failed: H,
+) -> Result<(), Error>
 where
     F: Fn(bool),
     G: Fn(Vec<AccessPoint>),
+    H: Fn(),
 {
     // Attempt to connect to the system DBus.
     let connection = Connection::system().await?;
@@ -31,6 +37,10 @@ where
     let network_manager = NetworkManagerProxy::new(&connection).await?;
     let wifi_enabled = network_manager.wireless_enabled().await.unwrap_or_default();
     status_changed(wifi_enabled);
+
+    // Get device state change stream.
+    let raw_device = DeviceProxy::builder(&connection).path(device.0.path())?.build().await?;
+    let mut device_state_stream = raw_device.receive_state_changed().await?;
 
     tokio::join!(
         // Listen for changes in WiFi status.
@@ -59,6 +69,23 @@ where
                 match access_points(&connection).await {
                     Ok(aps) => aps_changed(aps),
                     Err(err) => error!("Failed to update WiFi APs: {err}"),
+                }
+            }
+        },
+        // Listen for device changes to handle authentication errors.
+        async {
+            while let Some(device_state) = device_state_stream.next().await {
+                match device_state.args() {
+                    Ok(args) => {
+                        if args.new_state == DeviceState::Failed {
+                            error!("Wireless device entered failed state: {:?}", args.reason);
+
+                            if args.reason == DeviceStateReason::NoSecrets {
+                                auth_failed();
+                            }
+                        }
+                    },
+                    Err(err) => error!("Failed to parse device state change: {err}"),
                 }
             }
         },
@@ -419,6 +446,15 @@ trait Device {
     /// The general type of the network device; ie Ethernet, Wi-Fi, etc.
     #[zbus(property)]
     fn device_type(&self) -> zbus::Result<DeviceType>;
+
+    /// Device state change emitter.
+    #[zbus(signal)]
+    fn state_changed(
+        &self,
+        new_state: DeviceState,
+        old_state: DeviceState,
+        reason: DeviceStateReason,
+    ) -> zbus::Result<()>;
 }
 
 #[proxy(
@@ -533,4 +569,216 @@ pub enum APFlags {
     Wps = 2,
     WpsPbc = 4,
     WpsPin = 8,
+}
+
+/// Device state.
+#[derive(Deserialize_repr, Type, OwnedValue, PartialEq, Debug)]
+#[repr(u32)]
+pub enum DeviceState {
+    // The device's state is unknown.
+    Unknown = 0,
+    // The device is recognized, but not managed by NetworkManager.
+    Unmanaged = 10,
+    // The device is managed by NetworkManager, but is not available for use. Reasons may include
+    // the wireless switched off, missing firmware, no ethernet carrier, missing supplicant or
+    // modem manager, etc.
+    Unavailable = 20,
+    // The device can be activated, but is currently idle and not connected to a network.
+    Disconnected = 30,
+    // The device is preparing the connection to the network. This may include operations like
+    // changing the MAC address, setting physical link properties, and anything else required to
+    // connect to the requested network.
+    Prepare = 40,
+    // The device is connecting to the requested network. This may include operations like
+    // associating with the Wi-Fi AP, dialing the modem, connecting to the remote Bluetooth
+    // device, etc.
+    Config = 50,
+    // The device requires more information to continue connecting to the requested network. This
+    // includes secrets like WiFi passphrases, login passwords, PIN codes, etc.
+    NeedAuth = 60,
+    // The device is requesting IPv4 and/or IPv6 addresses and routing information from the
+    // network.
+    IpConfig = 70,
+    // The device is checking whether further action is required for the requested network
+    // connection. This may include checking whether only local network access is available,
+    // whether a captive portal is blocking access to the Internet, etc.
+    IpCheck = 80,
+    // The device is waiting for a secondary connection (like a VPN) which must activated before
+    // the device can be activated
+    Secondaries = 90,
+    // The device has a network connection, either local or global.
+    Activated = 100,
+    // A disconnection from the current network connection was requested, and the device is
+    // cleaning up resources used for that connection. The network connection may still be valid.
+    Deactivating = 110,
+    // The device failed to connect to the requested network and is cleaning up the connection
+    // request
+    Failed = 120,
+}
+
+/// Reason for a device state change.
+#[derive(Deserialize_repr, Type, OwnedValue, PartialEq, Debug)]
+#[repr(u32)]
+pub enum DeviceStateReason {
+    // No reason given.
+    None = 0,
+    // Unknown error.
+    Unknown = 1,
+    // Device is now managed.
+    NowManaged = 2,
+    // Device is now unmanaged.
+    NowUnmanaged = 3,
+    // The device could not be readied for configuration.
+    ConfigFailed = 4,
+    // IP configuration could not be reserved (no available address, timeout, etc).
+    IpConfigUnavailable = 5,
+    // The IP config is no longer valid.
+    IpConfigExpired = 6,
+    // Secrets were required, but not provided.
+    NoSecrets = 7,
+    // 802.1x supplicant disconnected.
+    SupplicantDisconnect = 8,
+    // 802.1x supplicant configuration failed.
+    SupplicantConfigFailed = 9,
+    // 802.1x supplicant failed.
+    SupplicantFailed = 10,
+    // 802.1x supplicant took too long to authenticate.
+    SupplicantTimeout = 11,
+    // PPP service failed to start.
+    PppStartFailed = 12,
+    // PPP service disconnected.
+    PppDisconnect = 13,
+    // PPP failed.
+    PppFailed = 14,
+    // DHCP client failed to start.
+    DhcpStartFailed = 15,
+    // DHCP client error.
+    DhcpError = 16,
+    // DHCP client failed.
+    DhcpFailed = 17,
+    // Shared connection service failed to start.
+    SharedStartFailed = 18,
+    // Shared connection service failed.
+    SharedFailed = 19,
+    // AutoIP service failed to start.
+    AutoipStartFailed = 20,
+    // AutoIP service error.
+    AutoipError = 21,
+    // AutoIP service failed.
+    AutoipFailed = 22,
+    // The line is busy.
+    ModemBusy = 23,
+    // No dial tone.
+    ModemNoDialTone = 24,
+    // No carrier could be established.
+    ModemNoCarrier = 25,
+    // The dialing request timed out.
+    ModemDialTimeout = 26,
+    // The dialing attempt failed.
+    ModemDialFailed = 27,
+    // Modem initialization failed.
+    ModemInitFailed = 28,
+    // Failed to select the specified APN.
+    GsmApnFailed = 29,
+    // Not searching for networks.
+    GsmRegistrationNotSearching = 30,
+    // Network registration denied.
+    GsmRegistrationDenied = 31,
+    // Network registration timed out.
+    GsmRegistrationTimeout = 32,
+    // Failed to register with the requested network.
+    GsmRegistrationFailed = 33,
+    // PIN check failed.
+    GsmPinCheckFailed = 34,
+    // Necessary firmware for the device may be missing.
+    FirmwareMissing = 35,
+    // The device was removed.
+    Removed = 36,
+    // NetworkManager went to sleep.
+    Sleeping = 37,
+    // The device's active connection disappeared.
+    ConnectionRemoved = 38,
+    // Device disconnected by user or client.
+    UserRequested = 39,
+    // Carrier/link changed.
+    Carrier = 40,
+    // The device's existing connection was assumed.
+    ConnectionAssumed = 41,
+    // The supplicant is now available.
+    SupplicantAvailable = 42,
+    // The modem could not be found.
+    ModemNotFound = 43,
+    // The Bluetooth connection failed or timed out.
+    BtFailed = 44,
+    // GSM Modem's SIM Card not inserted.
+    GsmSimNotInserted = 45,
+    // GSM Modem's SIM Pin required.
+    GsmSimPinRequired = 46,
+    // GSM Modem's SIM Puk required.
+    GsmSimPukRequired = 47,
+    // GSM Modem's SIM wrong.
+    GsmSimWrong = 48,
+    // InfiniBand device does not support connected mode.
+    InfinibandMode = 49,
+    // A dependency of the connection failed.
+    DependencyFailed = 50,
+    // Problem with the RFC 2684 Ethernet over ADSL bridge.
+    Br2684Failed = 51,
+    // ModemManager not running.
+    ModemManagerUnavailable = 52,
+    // The Wi-Fi network could not be found.
+    SsidNotFound = 53,
+    // A secondary connection of the base connection failed.
+    SecondaryConnectionFailed = 54,
+    // DCB or FCoE setup failed.
+    DcbFcoeFailed = 55,
+    // teamd control failed.
+    TeamdControlFailed = 56,
+    // Modem failed or no longer available.
+    ModemFailed = 57,
+    // Modem now ready and available.
+    ModemAvailable = 58,
+    // SIM PIN was incorrect.
+    SimPinIncorrect = 59,
+    // New connection activation was enqueued.
+    NewActivation = 60,
+    // the device's parent changed.
+    ParentChanged = 61,
+    // the device parent's management changed.
+    ParentManagedChanged = 62,
+    // problem communicating with Open vSwitch database.
+    OvsdbFailed = 63,
+    // a duplicate IP address was detected.
+    IpAddressDuplicate = 64,
+    // The selected IP method is not supported.
+    IpMethodUnsupported = 65,
+    // configuration of SR-IOV parameters failed.
+    SriovConfigurationFailed = 66,
+    // The Wi-Fi P2P peer could not be found.
+    PeerNotFound = 67,
+    // The device handler dispatcher returned an error. Since: 1.46
+    DeviceHandlerFailed = 68,
+    // The device is unmanaged because the device type is unmanaged by default. Since: 1.48
+    UnmanagedByDefault = 69,
+    // The device is unmanaged because it is an external device and is unconfigured (down or
+    // without addresses). Since: 1.48
+    UnmanagedExternalDown = 70,
+    // The device is unmanaged because the link is not initialized by udev. Since: 1.48
+    UnmanagedLinkNotInit = 71,
+    // The device is unmanaged because NetworkManager is quitting. Since: 1.48
+    UnmanagedQuitting = 72,
+    // The device is unmanaged because networking is disabled or the system is suspended. Since:
+    // 1.48
+    UnmanagedSleeping = 73,
+    // The device is unmanaged by user decision in NetworkManager.conf ('unmanaged' in a [device*]
+    // section). Since: 1.48
+    UnmanagedUserConf = 74,
+    // The device is unmanaged by explicit user decision (e.g. 'nmcli device set $DEV managed
+    // no'). Since: 1.48
+    UnmanagedUserExplicit = 75,
+    // The device is unmanaged by user decision via settings plugin ('unmanaged-devices' for
+    // keyfile or 'NMcONTROLLED=no' for ifcfg-rh). Since: 1.48
+    UnmanagedUserSettings = 76,
+    // The device is unmanaged via udev rule. Since: 1.48
+    UnmanagedUserUdev = 77,
 }

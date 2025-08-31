@@ -882,6 +882,7 @@ dependencies = [
  "pangocairo",
  "raw-window-handle",
  "serde",
+ "serde_repr",
  "smithay-client-toolkit",
  "thiserror 2.0.12",
  "tokio",

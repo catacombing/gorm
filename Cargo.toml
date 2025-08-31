@@ -21,6 +21,7 @@ librsvg = "2.60.0"
 pangocairo = "0.20.1"
 raw-window-handle = "0.6.2"
 serde = { version = "1.0.219", features = ["derive"] }
+serde_repr = "0.1.20"
 smithay-client-toolkit = { version = "0.19.2", default-features = false, features = ["xkbcommon"] }
 thiserror = "2.0.12"
 tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread"] }

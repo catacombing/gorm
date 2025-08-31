@@ -90,10 +90,8 @@ pub struct Colors {
     #[serde(alias = "alt_bg")]
     pub alt_background: Color,
 
-    /// Error foreground color.
+    /// Error color.
     pub error: Color,
-    /// Disabled foreground color.
-    pub disabled: Color,
 }
 
 impl Default for Colors {
@@ -107,7 +105,6 @@ impl Default for Colors {
             alt_background: Color::new(40, 40, 40),
 
             error: Color::new(172, 66, 66),
-            disabled: Color::new(102, 102, 102),
         }
     }
 }

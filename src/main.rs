@@ -68,11 +68,13 @@ async fn run() -> Result<(), Error> {
 
     // Spawn background listener for NetworkManager updates.
     let (status_tx, status_rx) = channel::channel();
+    let (error_tx, error_rx) = channel::channel();
     let (aps_tx, aps_rx) = channel::channel();
     tokio::spawn(async {
         let result = dbus::wifi_listen(
             move |status| _ = status_tx.send(status),
             move |aps| _ = aps_tx.send(aps),
+            move || _ = error_tx.send(()),
         );
         if let Err(err) = result.await {
             error!("DBus NetworkManager failure: {err}");
@@ -80,12 +82,17 @@ async fn run() -> Result<(), Error> {
     });
     event_loop.handle().insert_source(status_rx, |event, _, state| {
         if let Event::Msg(status) = event {
-            state.window.set_status(status)
+            state.window.set_status(status);
         }
     })?;
     event_loop.handle().insert_source(aps_rx, |event, _, state| {
         if let Event::Msg(aps) = event {
-            state.window.set_access_points(aps)
+            state.window.set_access_points(aps);
+        }
+    })?;
+    event_loop.handle().insert_source(error_rx, |event, _, state| {
+        if let Event::Msg(()) = event {
+            state.window.set_auth_failed();
         }
     })?;
 

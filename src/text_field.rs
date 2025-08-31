@@ -53,6 +53,7 @@ pub struct TextField {
 
     text_input_dirty: bool,
     focused: bool,
+    failed: bool,
     dirty: bool,
 }
 
@@ -77,6 +78,7 @@ impl TextField {
             focused: Default::default(),
             preedit: Default::default(),
             texture: Default::default(),
+            failed: Default::default(),
             width: Default::default(),
         }
     }
@@ -108,7 +110,11 @@ impl TextField {
         // Draw background color.
         let size = size.into();
         let builder = TextureBuilder::new(&self.config, size);
-        builder.clear(self.config.colors.alt_background.as_f64());
+        if self.failed {
+            builder.clear(self.config.colors.error.as_f64());
+        } else {
+            builder.clear(self.config.colors.alt_background.as_f64());
+        }
 
         // Set text rendering options.
         let padding = (PADDING * self.scale).round();
@@ -173,6 +179,9 @@ impl TextField {
         if modifiers.logo || modifiers.alt {
             return;
         }
+
+        // Clear failed state on keyboard input.
+        self.failed = false;
 
         match (keysym, modifiers.shift, modifiers.ctrl) {
             (Keysym::Return, false, false) => self.submit(),
@@ -488,6 +497,7 @@ impl TextField {
         self.change_cause = ChangeCause::InputMethod;
 
         self.text_input_dirty = true;
+        self.failed = false;
         self.dirty = true;
     }
 
@@ -514,6 +524,7 @@ impl TextField {
         self.update_scroll_offset();
 
         self.text_input_dirty = true;
+        self.failed = false;
         self.dirty = true;
     }
 
@@ -537,6 +548,7 @@ impl TextField {
         self.update_scroll_offset();
 
         self.text_input_dirty = true;
+        self.failed = false;
         self.dirty = true;
     }
 
@@ -615,6 +627,22 @@ impl TextField {
     /// Get current text content.
     pub fn text(&self) -> String {
         self.layout.text().to_string()
+    }
+
+    /// Clear the input's text content.
+    pub fn clear_text(&mut self) {
+        self.cursor_offset = 0;
+        self.cursor_index = 0;
+
+        self.layout.set_text("");
+
+        self.dirty = true;
+    }
+
+    /// Indicate failure related to the text field's content.
+    pub fn set_failed(&mut self) {
+        self.dirty |= !self.failed;
+        self.failed = true;
     }
 
     /// Modify text selection.
