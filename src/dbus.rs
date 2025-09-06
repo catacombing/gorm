@@ -13,16 +13,18 @@ use zbus::{Connection, proxy};
 
 use crate::Error;
 
+/// DBus events.
+pub enum DbusMessage {
+    AccessPoints(Vec<AccessPoint>),
+    Portal(bool),
+    Status(bool),
+    AuthFailed,
+}
+
 /// Listen for WiFi events.
-pub async fn wifi_listen<F, G, H>(
-    status_changed: F,
-    aps_changed: G,
-    auth_failed: H,
-) -> Result<(), Error>
+pub async fn wifi_listen<F>(event_handler: F) -> Result<(), Error>
 where
-    F: Fn(bool),
-    G: Fn(Vec<AccessPoint>),
-    H: Fn(),
+    F: Fn(DbusMessage),
 {
     // Attempt to connect to the system DBus.
     let connection = Connection::system().await?;
@@ -36,7 +38,7 @@ where
     // Set initial toggle button state.
     let network_manager = NetworkManagerProxy::new(&connection).await?;
     let wifi_enabled = network_manager.wireless_enabled().await.unwrap_or_default();
-    status_changed(wifi_enabled);
+    event_handler(DbusMessage::Status(wifi_enabled));
 
     // Get device state change stream.
     let raw_device = DeviceProxy::builder(&connection).path(device.0.path())?.build().await?;
@@ -48,7 +50,7 @@ where
             let mut onoff_stream = network_manager.receive_wireless_enabled_changed().await;
             while let Some(new_state) = onoff_stream.next().await {
                 if let Ok(new_state) = new_state.get().await {
-                    status_changed(new_state);
+                    event_handler(DbusMessage::Status(new_state));
                 }
             }
         },
@@ -57,7 +59,7 @@ where
             let mut ap_change_stream = device.receive_access_points_changed().await;
             while ap_change_stream.next().await.is_some() {
                 match access_points(&connection).await {
-                    Ok(aps) => aps_changed(aps),
+                    Ok(aps) => event_handler(DbusMessage::AccessPoints(aps)),
                     Err(err) => error!("Failed to update WiFi APs: {err}"),
                 }
             }
@@ -67,7 +69,7 @@ where
             let mut active_ap_change_stream = device.receive_active_access_point_changed().await;
             while active_ap_change_stream.next().await.is_some() {
                 match access_points(&connection).await {
-                    Ok(aps) => aps_changed(aps),
+                    Ok(aps) => event_handler(DbusMessage::AccessPoints(aps)),
                     Err(err) => error!("Failed to update WiFi APs: {err}"),
                 }
             }
@@ -81,11 +83,20 @@ where
                             error!("Wireless device entered failed state: {:?}", args.reason);
 
                             if args.reason == DeviceStateReason::NoSecrets {
-                                auth_failed();
+                                event_handler(DbusMessage::AuthFailed);
                             }
                         }
                     },
                     Err(err) => error!("Failed to parse device state change: {err}"),
+                }
+            }
+        },
+        // Listen for captive portal login requests.
+        async {
+            let mut connectivity_stream = network_manager.receive_connectivity_changed().await;
+            while let Some(state) = connectivity_stream.next().await {
+                if let Ok(state) = state.get().await {
+                    event_handler(DbusMessage::Portal(state == ConnectivityState::Portal));
                 }
             }
         },
@@ -431,6 +442,10 @@ pub trait NetworkManager {
     /// List of active connection object paths.
     #[zbus(property)]
     fn active_connections(&self) -> zbus::Result<Vec<OwnedObjectPath>>;
+
+    /// Network connectivity state.
+    #[zbus(property)]
+    fn connectivity(&self) -> zbus::Result<ConnectivityState>;
 }
 
 #[proxy(
@@ -781,4 +796,30 @@ pub enum DeviceStateReason {
     UnmanagedUserSettings = 76,
     // The device is unmanaged via udev rule. Since: 1.48
     UnmanagedUserUdev = 77,
+}
+
+/// Network connectivity state.
+#[derive(Deserialize_repr, Type, OwnedValue, PartialEq, Debug)]
+#[repr(u32)]
+pub enum ConnectivityState {
+    // Network connectivity is unknown. This means the connectivity checks are disabled (e.g. on
+    // server installations) or has not run yet. The graphical shell should assume the Internet
+    // connection might be available and not present a captive portal window.
+    Unknown = 0,
+    // The host is not connected to any network. There's no active connection that contains a
+    // default route to the internet and thus it makes no sense to even attempt a connectivity
+    // check. The graphical shell should use this state to indicate the network connection is
+    // unavailable.
+    None = 1,
+    // The Internet connection is hijacked by a captive portal gateway. The graphical shell may
+    // open a sandboxed web browser window (because the captive portals typically attempt a
+    // man-in-the-middle attacks against the https connections) for the purpose of authenticating
+    // to a gateway and retrigger the connectivity check with CheckConnectivity() when the browser
+    // window is dismissed.
+    Portal = 2,
+    // The host is connected to a network, does not appear to be able to reach the full Internet,
+    // but a captive portal has not been detected.
+    Limited = 3,
+    // The host is connected to a network, and appears to be able to reach the full Internet.
+    Full = 4,
 }

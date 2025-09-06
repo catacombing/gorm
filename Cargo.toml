@@ -17,6 +17,7 @@ futures-util = { version = "0.3.31", features = ["tokio-io"] }
 gio = "0.20.1"
 glib = "0.20.1"
 glutin = { version = "0.32.1", default-features = false, features = ["egl", "wayland"] }
+libc = "0.2.175"
 librsvg = "2.60.0"
 pangocairo = "0.20.1"
 raw-window-handle = "0.6.2"

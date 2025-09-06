@@ -38,6 +38,8 @@ pub struct Config {
     pub colors: Colors,
     /// This section documents the `[input]` table.
     pub input: Input,
+    /// Captive portal brower settings.
+    pub browser: Browser,
 }
 
 /// Font configuration.
@@ -135,6 +137,23 @@ impl Default for Input {
             velocity_friction: 0.85,
             max_tap_distance: 400.,
         }
+    }
+}
+
+/// Captive portal browser configuration.
+#[derive(Docgen, Deserialize, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct Browser {
+    /// App used to open the captive portal.
+    #[serde(alias = "app")]
+    pub application: String,
+    /// Captive portal detection URI.
+    pub portal: String,
+}
+
+impl Default for Browser {
+    fn default() -> Self {
+        Self { portal: "http://detectportal.firefox.com".into(), application: "xdg-open".into() }
     }
 }
 

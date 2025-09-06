@@ -27,7 +27,7 @@ use crate::geometry::{Position, Size, rect_contains};
 use crate::renderer::{Renderer, Svg, TextLayout, TextOptions, Texture, TextureBuilder};
 use crate::text_field::TextField;
 use crate::wayland::ProtocolStates;
-use crate::{Error, State, dbus, gl};
+use crate::{Error, State, daemon, dbus, gl};
 
 /// Logical height of each connection entry at scale 1.
 const ENTRY_HEIGHT: u32 = 50;
@@ -70,10 +70,12 @@ pub struct Window {
     details: AccessPointDetails,
     connect_button: TextButton,
     forget_button: TextButton,
+    portal_button: TextButton,
     password_field: TextField,
     refresh_button: SvgButton,
     toggle_button: SvgButton,
     back_button: SvgButton,
+    captive_portal_active: bool,
     view: View,
 
     velocity: ScrollVelocity,
@@ -134,6 +136,7 @@ impl Window {
         let disconnect_button = TextButton::new(config.clone(), "Disconnect");
         let connect_button = TextButton::new(config.clone(), "Connect");
         let forget_button = TextButton::new(config.clone(), "Forget");
+        let portal_button = TextButton::new(config.clone(), "Captive Portal");
         let refresh_button = SvgButton::new(config.clone(), Svg::Refresh);
         let back_button = SvgButton::new(config.clone(), Svg::ArrowLeft);
         let toggle_button = SvgButton::new_toggle(config.clone(), Svg::Wifi100, Svg::WifiDisabled);
@@ -152,7 +155,7 @@ impl Window {
                 let path = access_point.path.clone();
                 let ssid = access_point.ssid.clone();
 
-                spawn_async(&async_loop, "password connect failed", async move {
+                spawn_async(&async_loop, "Password connect failed", async move {
                     dbus::connect(path.as_ref(), &ssid, Some(password)).await
                 });
             });
@@ -164,6 +167,7 @@ impl Window {
             password_field,
             refresh_button,
             forget_button,
+            portal_button,
             toggle_button,
             back_button,
             connection,
@@ -180,6 +184,7 @@ impl Window {
             dirty: true,
             scale: 1.,
             initial_configure_done: Default::default(),
+            captive_portal_active: Default::default(),
             scroll_offset: Default::default(),
             touch_state: Default::default(),
             text_input: Default::default(),
@@ -239,6 +244,7 @@ impl Window {
         let password_field_pos = self.password_field_position().into();
         let password_field_size = self.password_field_size();
         let refresh_button_pos = self.refresh_button_position().into();
+        let portal_button_pos = self.portal_button_position().into();
         let forget_button_pos = self.forget_button_position().into();
         let back_button_pos = self.back_button_position().into();
         let entry_size = self.entry_size();
@@ -329,6 +335,12 @@ impl Window {
                     renderer.draw_texture_at(back_texture, back_button_pos, None);
                 },
             }
+
+            // Render portal button in any UI of login is required.
+            if self.captive_portal_active {
+                let portal_texture = self.portal_button.texture();
+                renderer.draw_texture_at(portal_texture, portal_button_pos, None);
+            }
         });
 
         // Request a new frame.
@@ -378,6 +390,13 @@ impl Window {
         }
     }
 
+    /// Update captive portal state.
+    pub fn set_portal(&mut self, active: bool) {
+        self.dirty |= self.captive_portal_active != active;
+        self.captive_portal_active = active;
+        self.unstall();
+    }
+
     /// Mark password as invalid.
     pub fn set_auth_failed(&mut self) {
         self.password_field.set_failed();
@@ -410,6 +429,7 @@ impl Window {
         self.connect_button.set_geometry(self.connect_button_size(), self.scale);
         self.refresh_button.set_geometry(self.refresh_button_size(), self.scale);
         self.forget_button.set_geometry(self.forget_button_size(), self.scale);
+        self.portal_button.set_geometry(self.portal_button_size(), self.scale);
         self.toggle_button.set_geometry(self.toggle_button_size(), self.scale);
         self.back_button.set_geometry(self.back_button_size(), self.scale);
         self.details.set_geometry(self.max_details_size(), self.scale);
@@ -433,6 +453,7 @@ impl Window {
         self.connect_button.set_geometry(self.connect_button_size(), self.scale);
         self.refresh_button.set_geometry(self.refresh_button_size(), self.scale);
         self.forget_button.set_geometry(self.forget_button_size(), self.scale);
+        self.portal_button.set_geometry(self.portal_button_size(), self.scale);
         self.toggle_button.set_geometry(self.toggle_button_size(), self.scale);
         self.back_button.set_geometry(self.back_button_size(), self.scale);
         self.details.set_geometry(self.max_details_size(), self.scale);
@@ -452,6 +473,7 @@ impl Window {
         self.password_field.set_config(self.config.clone());
         self.refresh_button.set_config(self.config.clone());
         self.forget_button.set_config(self.config.clone());
+        self.portal_button.set_config(self.config.clone());
         self.toggle_button.set_config(self.config.clone());
         self.back_button.set_config(self.config.clone());
         self.textures.set_config(self.config.clone());
@@ -481,6 +503,8 @@ impl Window {
         let refresh_button_size = self.refresh_button_size().into();
         let forget_button_position = self.forget_button_position();
         let forget_button_size = self.forget_button_size().into();
+        let portal_button_position = self.portal_button_position();
+        let portal_button_size = self.portal_button_size().into();
         let toggle_button_position = self.toggle_button_position();
         let toggle_button_size = self.toggle_button_size().into();
         let back_button_position = self.back_button_position();
@@ -510,7 +534,9 @@ impl Window {
             self.password_field.set_focused(false);
         }
 
-        if details && rect_contains(back_button_position, back_button_size, position) {
+        if rect_contains(portal_button_position, portal_button_size, position) {
+            self.touch_state.action = TouchAction::PortalTap;
+        } else if details && rect_contains(back_button_position, back_button_size, position) {
             self.touch_state.action = TouchAction::BackTap;
         } else if (details && !details_connected)
             && (rect_contains(connect_button_position, connect_button_size, position)
@@ -669,7 +695,7 @@ impl Window {
                 if rect_contains(button_position, button_size, position) {
                     spawn_async(
                         &self.event_loop,
-                        "state toggle failed",
+                        "State toggle failed",
                         dbus::set_enabled(!enabled),
                     );
                 }
@@ -688,6 +714,20 @@ impl Window {
             (View::List, TouchAction::EntryTap(index)) => {
                 if let Some(access_point) = self.textures.access_points.get(index) {
                     self.set_view(View::Details(access_point.clone()));
+                }
+            },
+            // Open captive portal login.
+            (_, TouchAction::PortalTap) => {
+                let button_position = self.portal_button_position();
+                let button_size = self.portal_button_size().into();
+                let browser = &self.config.browser.application;
+                let position = self.touch_state.position;
+                let portal = &self.config.browser.portal;
+
+                if rect_contains(button_position, button_size, position)
+                    && let Err(err) = daemon::spawn(browser, [portal])
+                {
+                    error!("Failed to open captive portal: {err}");
                 }
             },
             _ => (),
@@ -891,6 +931,23 @@ impl Window {
     fn forget_button_position(&self) -> Position<f64> {
         let mut position = self.disconnect_button_position();
         position.x = (OUTSIDE_PADDING * self.scale).round();
+        position
+    }
+
+    /// Physical size of the "Captive Portal" button.
+    fn portal_button_size(&self) -> Size {
+        let width = self.size.width
+            - 2 * OUTSIDE_PADDING as u32
+            - 2 * BUTTON_PADDING as u32
+            - 2 * BUTTON_HEIGHT;
+        Size::new(width, BUTTON_HEIGHT) * self.scale
+    }
+
+    /// Physical position of the "Captive Portal" button.
+    fn portal_button_position(&self) -> Position<f64> {
+        let mut position = self.toggle_button_position();
+        position.x += self.toggle_button_size().width as f64;
+        position.x += BUTTON_PADDING * self.scale;
         position
     }
 
@@ -1466,6 +1523,7 @@ enum TouchAction {
     ConnectTap,
     RefreshTap,
     ForgetTap,
+    PortalTap,
     ToggleTap,
     BackTap,
 }
@@ -1532,7 +1590,7 @@ where
     F: Future<Output = Result<(), zbus::Error>> + 'static,
 {
     if let Err(err) = spawn_async_inner(event_loop, error_message, f) {
-        error!("failed to spawn task: {err}");
+        error!("Failed to spawn task: {err}");
     }
 }
 

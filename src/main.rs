@@ -23,10 +23,12 @@ use tracing::{error, info};
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use crate::config::ConfigEventHandler;
+use crate::dbus::DbusMessage;
 use crate::wayland::{ProtocolStates, TextInput};
 use crate::window::Window;
 
 mod config;
+mod daemon;
 mod dbus;
 mod geometry;
 mod renderer;
@@ -67,33 +69,19 @@ async fn run() -> Result<(), Error> {
     wayland_source.insert(event_loop.handle())?;
 
     // Spawn background listener for NetworkManager updates.
-    let (status_tx, status_rx) = channel::channel();
-    let (error_tx, error_rx) = channel::channel();
-    let (aps_tx, aps_rx) = channel::channel();
+    let (dbus_tx, dbus_rx) = channel::channel();
     tokio::spawn(async {
-        let result = dbus::wifi_listen(
-            move |status| _ = status_tx.send(status),
-            move |aps| _ = aps_tx.send(aps),
-            move || _ = error_tx.send(()),
-        );
+        let result = dbus::wifi_listen(move |msg| _ = dbus_tx.send(msg));
         if let Err(err) = result.await {
             error!("DBus NetworkManager failure: {err}");
         }
     });
-    event_loop.handle().insert_source(status_rx, |event, _, state| {
-        if let Event::Msg(status) = event {
-            state.window.set_status(status);
-        }
-    })?;
-    event_loop.handle().insert_source(aps_rx, |event, _, state| {
-        if let Event::Msg(aps) = event {
-            state.window.set_access_points(aps);
-        }
-    })?;
-    event_loop.handle().insert_source(error_rx, |event, _, state| {
-        if let Event::Msg(()) = event {
-            state.window.set_auth_failed();
-        }
+    event_loop.handle().insert_source(dbus_rx, |event, _, state| match event {
+        Event::Msg(DbusMessage::AccessPoints(aps)) => state.window.set_access_points(aps),
+        Event::Msg(DbusMessage::Portal(enabled)) => state.window.set_portal(enabled),
+        Event::Msg(DbusMessage::Status(enabled)) => state.window.set_status(enabled),
+        Event::Msg(DbusMessage::AuthFailed) => state.window.set_auth_failed(),
+        _ => (),
     })?;
 
     // Start event loop.
