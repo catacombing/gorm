@@ -1,6 +1,6 @@
 [package]
 name = "gorm"
-version = "1.1.0"
+version = "1.1.1"
 description = "Mobile-optimized Linux WiFi settings"
 authors = ["Christian Duerr <contact@christianduerr.com>"]
 repository = "https://github.com/catacombing/gorm"
@@ -14,16 +14,16 @@ calloop-wayland-source = "0.4.0"
 configory = { version = "0.5.1", features = ["docgen", "log"] }
 dashmap = "6.1.0"
 futures-util = { version = "0.3.31", features = ["tokio-io"] }
-gio = "0.20.1"
-glib = "0.20.1"
+gio = "0.21.2"
+glib = "0.21.3"
 glutin = { version = "0.32.1", default-features = false, features = ["egl", "wayland"] }
 libc = "0.2.175"
 librsvg = "2.60.0"
-pangocairo = "0.20.1"
+pangocairo = "0.21.2"
 raw-window-handle = "0.6.2"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_repr = "0.1.20"
-smithay-client-toolkit = { version = "0.19.2", default-features = false, features = ["xkbcommon"] }
+smithay-client-toolkit = { version = "0.20.0", default-features = false, features = ["xkbcommon"] }
 thiserror = "2.0.12"
 tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1.41"
