@@ -109,23 +109,22 @@ impl Window {
         let raw_display = RawDisplayHandle::Wayland(wayland_display);
         let egl_display = unsafe { Display::new(raw_display, DisplayApiPreference::Egl)? };
 
+        // Create surface's Wayland global handles.
+        let surface = protocol_states.compositor.create_surface(&queue);
+        if let Some(fractional_scale) = &protocol_states.fractional_scale {
+            fractional_scale.fractional_scaling(&queue, &surface);
+        }
+        let viewport = protocol_states.viewporter.viewport(&queue, &surface);
+
         // Create the XDG shell window.
         let decorations = WindowDecorations::RequestServer;
-        let surface = protocol_states.compositor.create_surface(&queue);
         let xdg = protocol_states.xdg_shell.create_window(surface, decorations, &queue);
         xdg.set_title("Gorm");
         xdg.set_app_id("Gorm");
         xdg.commit();
 
         // Create OpenGL renderer.
-        let wl_surface = xdg.wl_surface();
-        let renderer = Renderer::new(egl_display, wl_surface.clone());
-
-        // Create surface's Wayland global handles.
-        if let Some(fractional_scale) = &protocol_states.fractional_scale {
-            fractional_scale.fractional_scaling(&queue, wl_surface);
-        }
-        let viewport = protocol_states.viewporter.viewport(&queue, wl_surface);
+        let renderer = Renderer::new(egl_display, xdg.wl_surface().clone());
 
         // Default to a reasonable default size.
         let size = Size { width: 360, height: 720 };
@@ -568,7 +567,7 @@ impl Window {
         self.unstall();
     }
 
-    /// Handle touch release.
+    /// Handle touch motion.
     pub fn touch_motion(&mut self, logical_position: Position<f64>) {
         // Update touch position.
         let position = logical_position * self.scale;
@@ -1568,7 +1567,7 @@ impl ScrollVelocity {
         // Calculate velocity steps since last tick.
         let now = Instant::now();
         let interval =
-            ((now - last_tick).as_micros() / (input.velocity_interval as u128 * 1_000)) as f64;
+            (now - last_tick).as_micros() as f64 / (input.velocity_interval as f64 * 1_000.);
 
         // Apply and update velocity.
         *scroll_offset += self.velocity * (1. - input.velocity_friction.powf(interval + 1.))
