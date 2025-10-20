@@ -210,8 +210,8 @@ pub async fn access_points(connection: &Connection) -> zbus::Result<Vec<AccessPo
     }
 
     // Sort by signal strength.
-    access_points.sort_unstable_by(|a, b| match b.connected.cmp(&a.connected) {
-        Ordering::Equal => b.strength.cmp(&a.strength),
+    access_points.sort_unstable_by(|a, b| match a.connected.cmp(&b.connected) {
+        Ordering::Equal => a.strength.cmp(&b.strength),
         ordering => ordering,
     });
 

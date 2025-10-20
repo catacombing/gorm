@@ -354,7 +354,7 @@ impl Window {
     /// This will render a new frame if there currently is no frame request
     /// pending.
     pub fn unstall(&mut self) {
-        // Ignore if unstalled or request came from background engine.
+        // Ignore if unstalled.
         if !mem::take(&mut self.stalled) {
             return;
         }
