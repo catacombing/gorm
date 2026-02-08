@@ -207,11 +207,10 @@ impl Window {
 
     /// Redraw the window.
     pub fn draw(&mut self) {
-        if !self.dirty() {
+        if !self.dirty() || !self.initial_configure_done {
             self.stalled = true;
             return;
         }
-        self.initial_configure_done = true;
         self.dirty = false;
 
         // Update IME state.
@@ -411,6 +410,7 @@ impl Window {
             Some(_) | None => return,
         };
 
+        self.initial_configure_done = true;
         self.size = size;
         self.dirty = true;
 
