@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "gorm"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "calloop",
  "calloop-wayland-source",
