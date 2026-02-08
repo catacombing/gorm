@@ -11,7 +11,7 @@ edition = "2024"
 [dependencies]
 calloop = { version = "0.14.3", features = ["executor"] }
 calloop-wayland-source = "0.4.0"
-configory = { version = "0.5.1", features = ["docgen", "log"] }
+configory = { version = "0.6.2", features = ["docgen", "log"] }
 dashmap = "6.1.0"
 futures-util = { version = "0.3.31", features = ["tokio-io"] }
 gio = "0.21.2"
